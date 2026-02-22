@@ -1,0 +1,8 @@
+Circuit_ID,Sequence
+BBa_K173000,pT7 RBS GFP Term
+BBa_K325909,pLux RBS luxA RBS luxB Term
+BBa_I13507,pTet RBS RFP Term
+BBa_J245553,pBAD RBS GFP Term
+METABO_01,pLac RBS lacZ RBS lacY RBS lacA Term
+LUMIDOMUS_01,pCab RBS rbcL RBS rbcS Term
+HUMAN_01,pCMV Kozak INS Term

@@ -2,25 +2,27 @@ import streamlit as st
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+import cobra
+import cobra.io
+import networkx as nx
+import matplotlib.pyplot as plt
 
 # ==========================================
-# 1. THE UNIFIED DATASET (Bacteria + Plant + Human)
+# 1. RECREATE THE AI'S KNOWLEDGE BASE
 # ==========================================
-text_data = """
-pBAD RBS GFP Term [END]
-pTet RBS RFP Term [END]
-pLac RBS Cas9 Term [END]
-pLac RBS lacZ RBS lacY RBS lacA Term [END]
-pLux RBS luxA RBS luxB Term [END]
-pTox RBS enzymeA RBS enzymeB Term [END]
-pBAD RBS luxA RBS luxB Term [END]
-p35S RBS psbA RBS psbD Term [END]
-pCab RBS rbcL RBS rbcS Term [END]
-pCMV Kozak INS Term [END]
-pEF1a Kozak p53 Term [END]
-p35S RBS rbcL Term [END]
-pCMV Kozak p53 Term [END]
-"""
+# Read the vocabulary dynamically from our dataset file
+try:
+    with open("igem_dataset.txt", "r") as f:
+        text_data = f.read()
+except FileNotFoundError:
+    st.error("Dataset 'igem_dataset.txt' not found. Please run the data processor first.")
+    st.stop()
+
+words = text_data.split()
+vocab = sorted(list(set(words)))
+vocab_size = len(vocab)
+word_to_int = {w: i for i, w in enumerate(vocab)}
+int_to_word = {i: w for i, w in enumerate(vocab)}
 words = text_data.split()
 vocab = sorted(list(set(words)))
 vocab_size = len(vocab)
@@ -84,7 +86,7 @@ class GeneticTransformer(nn.Module):
 # Configure the web page
 st.set_page_config(page_title="BioBrick AI", page_icon="🧬")
 st.title("🧬 AI Genetic Circuit Designer")
-st.markdown("Design custom synthetic biology pathways using a miniature Large Language Model.")
+st.markdown("Design custom synthetic biology pathways using a miniature Large Language Model by alienstar.com")
 
 # Load the model weights efficiently
 @st.cache_resource 
@@ -109,7 +111,8 @@ max_length = st.sidebar.slider("Max Circuit Length", min_value=3, max_value=15, 
 
 # Main interface inputs
 # Main interface inputs
-valid_promoters = ['pLac', 'pBAD', 'pTet', 'pLux', 'pTox', 'p35S', 'pCab', 'pCMV', 'pEF1a']
+# Automatically find all promoters in the AI's vocabulary (words starting with 'p')
+valid_promoters = [word for word in vocab if word.startswith('p')]
 starting_part = st.selectbox("Choose a starting Promoter:", valid_promoters)
 
 # The Generation Button
@@ -169,3 +172,150 @@ if st.button("Generate Genetic Circuit"):
         if part in part_descriptions and part not in explained_parts:
             st.info(f"**{part}**: {part_descriptions[part]}")
             explained_parts.add(part)
+
+
+# ==========================================
+    # 4. METABOLIC SIMULATION (FBA)
+    # ==========================================
+    st.markdown("---")
+    st.subheader("🧫 Flux Balance Analysis (FBA) Simulation")
+    
+    with st.spinner("Booting up E. coli Digital Twin..."):
+        try:
+            # 1. Load the textbook E. coli model
+            model = cobra.io.load_model("textbook")
+            
+            # 2. Run Baseline FBA
+            baseline_solution = model.optimize()
+            baseline_growth = baseline_solution.objective_value
+            
+            # 3. Calculate Dynamic Metabolic Load
+            # Every part the AI generates costs the cell energy (ATP). 
+            # We assign an arbitrary cost of 5.0 ATP per genetic part.
+            atp_cost_per_part = 5.0
+            synthetic_load = len(generated_circuit) * atp_cost_per_part
+            
+            # Apply the new heavy energy constraint to the cell
+            atpm_reaction = model.reactions.get_by_id("ATPM")
+            original_atpm = atpm_reaction.lower_bound
+            atpm_reaction.lower_bound = original_atpm + synthetic_load
+            
+            # 4. Run Engineered FBA
+            engineered_solution = model.optimize()
+            engineered_growth = engineered_solution.objective_value
+            
+            # 5. Display the Results in a clean UI Dashboard
+            cols = st.columns(3)
+            cols[0].metric("Baseline Growth Rate", f"{baseline_growth:.4f} h^-1")
+            cols[1].metric("Added ATP Burden", f"+{synthetic_load} units")
+            
+           # Check if the cell survived the AI's modification
+            if engineered_growth < 0.01:
+                cols[2].metric("Engineered Growth Rate", "FATAL", delta="-100%", delta_color="inverse")
+                st.error("⚠️ **Simulation Failed:** The AI's circuit is too metabolically expensive. The cell starved and died.")
+            else:
+                # Calculate the percentage drop in growth speed
+                delta_pct = ((engineered_growth - baseline_growth) / baseline_growth) * 100
+                cols[2].metric("Engineered Growth Rate", f"{engineered_growth:.4f} h^-1", f"{delta_pct:.2f}%", delta_color="inverse")
+                st.success("✅ **Simulation Success:** The E. coli successfully integrated the pathway and survived!")
+                
+                # ==========================================
+                # 5. METABOLIC FLUX VISUALIZATION
+                # ==========================================
+                st.markdown("---")
+                st.subheader("🕸️ Core Metabolic Flux Map")
+                st.caption("Visualizing the top active chemical reactions in the engineered cell.")
+                
+                with st.spinner("Drawing metabolic network..."):
+                    # Get the top 10 most active reactions (absolute flux)
+                    top_fluxes = engineered_solution.fluxes.abs().sort_values(ascending=False).head(10)
+                    
+                    # Initialize a directed graph
+                    G = nx.DiGraph()
+                    
+                    # Build the graph edges based on metabolites
+                    for rxn_id in top_fluxes.index:
+                        rxn = model.reactions.get_by_id(rxn_id)
+                        # Connect each reactant to each product for this reaction
+                        for reactant in rxn.reactants:
+                            for product in rxn.products:
+                                G.add_edge(reactant.id, product.id, weight=top_fluxes[rxn_id])
+                    
+                    # Set up the visual plot
+                    fig, ax = plt.subplots(figsize=(10, 6))
+                    
+                    # Create a layout that pushes nodes apart so they don't overlap
+                    pos = nx.spring_layout(G, seed=42, k=5.0, iterations=100)
+                    
+                    # Draw the network
+                    nx.draw(
+                        G, pos, ax=ax, 
+                        with_labels=True, 
+                        node_color='#1f77b4', 
+                        node_size=1500, 
+                        font_size=8, 
+                        font_color='white', 
+                        font_weight='bold',
+                        edge_color='#555555',
+                        arrowsize=20
+                    )
+                    
+                    # Make the background transparent to match Streamlit's dark mode
+                    fig.patch.set_alpha(0.0)
+                    ax.patch.set_alpha(0.0)
+                    
+                    # Display the plot in Streamlit
+                    st.pyplot(fig)
+                
+        except Exception as e:
+            st.error(f"Simulation encountered an error: {e}")
+
+# ==========================================
+            # 5. METABOLIC FLUX VISUALIZATION
+            # ==========================================
+            '''if engineered_growth >= 0.01:
+                st.markdown("---")
+                st.subheader("🕸️ Core Metabolic Flux Map")
+                st.caption("Visualizing the top active chemical reactions in the engineered cell.")
+                
+                with st.spinner("Drawing metabolic network..."):
+                    # Get the top 10 most active reactions (absolute flux)
+                    top_fluxes = engineered_solution.fluxes.abs().sort_values(ascending=False).head(10)
+                    
+                    # Initialize a directed graph
+                    G = nx.DiGraph()
+                    
+                    # Build the graph edges based on metabolites
+                    for rxn_id in top_fluxes.index:
+                        rxn = model.reactions.get_by_id(rxn_id)
+                        # Connect each reactant to each product for this reaction
+                        for reactant in rxn.reactants:
+                            for product in rxn.products:
+                                # We use the flux value to determine the "weight" of the line
+                                G.add_edge(reactant.id, product.id, weight=top_fluxes[rxn_id])
+                    
+                    # Set up the visual plot
+                    fig, ax = plt.subplots(figsize=(10, 6))
+                    
+                    # Create a layout that pushes nodes apart so they don't overlap
+                    pos = nx.spring_layout(G, seed=42, k=5.0, iterations=100)
+                    
+                    # Draw the network
+                    nx.draw(
+                        G, pos, ax=ax, 
+                        with_labels=True, 
+                        node_color='#1f77b4', 
+                        node_size=1500, 
+                        font_size=8, 
+                        font_color='white', 
+                        font_weight='bold',
+                        edge_color='#555555',
+                        arrowsize=20
+                    )
+                    
+                    # Make the background transparent to match Streamlit's dark mode
+                    fig.patch.set_alpha(0.0)
+                    ax.patch.set_alpha(0.0)
+                    
+                    # Display the plot in Streamlit
+                    st.pyplot(fig)'''           

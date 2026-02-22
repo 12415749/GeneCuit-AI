@@ -3,23 +3,13 @@ import torch.nn as nn
 from torch.nn import functional as F
 
 # ==========================================
-# 1. THE UNIFIED DATASET (Bacteria + Plant + Human)
+# 1. THE DATASET (Loaded from iGEM Scraper)
 # ==========================================
-text_data = """
-pBAD RBS GFP Term [END]
-pTet RBS RFP Term [END]
-pLac RBS Cas9 Term [END]
-pLac RBS lacZ RBS lacY RBS lacA Term [END]
-pLux RBS luxA RBS luxB Term [END]
-pTox RBS enzymeA RBS enzymeB Term [END]
-pBAD RBS luxA RBS luxB Term [END]
-p35S RBS psbA RBS psbD Term [END]
-pCab RBS rbcL RBS rbcS Term [END]
-pCMV Kozak INS Term [END]
-pEF1a Kozak p53 Term [END]
-p35S RBS rbcL Term [END]
-pCMV Kozak p53 Term [END]
-"""
+# Read the scraped dataset directly from the text file
+with open("igem_dataset.txt", "r") as f:
+    text_data = f.read()
+
+# The rest of your code remains exactly the same!
 
 words = text_data.split()
 vocab = sorted(list(set(words)))

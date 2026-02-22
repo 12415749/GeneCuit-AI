@@ -1,0 +1,8 @@
+pT7 RBS GFP Term [END]
+pLux RBS luxA RBS luxB Term [END]
+pTet RBS RFP Term [END]
+pBAD RBS GFP Term [END]
+pLac RBS lacZ RBS lacY RBS lacA Term [END]
+pCab RBS rbcL RBS rbcS Term [END]
+pCMV Kozak INS Term [END]
+pEF1a Kozak INS Term [END]
